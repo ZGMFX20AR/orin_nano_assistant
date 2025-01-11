@@ -9,3 +9,4 @@ sudo apt install -y cmake git libasound2-dev python3 python3-pip python3-venv ff
 # Install ONNX Runtime for Python
 pip3 install --upgrade pip
 pip3 install onnxruntime
+pip3 install pyyaml
