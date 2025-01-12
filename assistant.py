@@ -2,6 +2,7 @@ import whisper, requests, os, sounddevice as sd, numpy as np, tempfile, wave
 import faiss
 from sentence_transformers import SentenceTransformer
 import torch
+import yaml  # Import PyYAML
 
 # Optimization: Use a more efficient embedding model for Jetson Orin Nano
 embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
@@ -13,10 +14,25 @@ whisper_model = whisper.load_model("base").to(device)
 # Configuration for local LLM server
 llama_url = "http://127.0.0.1:8080/completion"
 
-# Initial prompt to guide the LLaMA model's behavior
-initial_prompt = ("You're an AI assistant specialized in AI development, embedded systems like the Jetson Nano, and Google technologies. "
-                  "Answer questions clearly and concisely in a friendly, professional tone. Do not use asterisks, do not ask new questions "
-                  "or act as the user. Keep replies short to speed up inference. If unsure, admit it and suggest looking into it further.")
+# Load personalities from YAML file
+def load_personalities(filepath):
+    with open(filepath, 'r') as file:
+        return yaml.safe_load(file)['personalities']
+
+personalities = load_personalities('personalities.yml')
+
+# Function to prompt user to select personality via voice
+def select_personality():
+    print("Please say the name of the desired personality:")
+    record_audio('temp_selection.wav')  # Record voice input
+    selection = transcribe_audio('temp_selection.wav').strip().lower()
+    for key, persona in personalities.items():
+        if persona['name'].lower() in selection:
+            return persona['prompt']
+    return personalities['cheerful']['prompt']  # Default personality
+
+# Set initial_prompt based on user selection
+initial_prompt = select_personality()
 
 # Current directory and path for beep sound files (used to indicate recording start and end)
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -99,6 +115,35 @@ def rag_ask(query):
 def text_to_speech(text):
     os.system(f'echo "{text}" | /home/orin_nano/piper/build/piper --model /usr/local/share/piper/models/en_US-lessac-medium.onnx --output_file response.wav && aplay response.wav')
 
+# New function: Save code to desktop
+def save_code_to_desktop(code, language):
+    import os
+    from pathlib import Path
+
+    # Get the desktop path
+    desktop = Path.home() / "Desktop"
+    # Create the file name
+    filename = desktop / f"response_code.{language}"
+    # Write the code to the file
+    with open(filename, "w") as file:
+        file.write(code)
+    print(f"Code saved to desktop: {filename}")
+
+# Convert text to speech using Piper TTS model or handle code saving
+def handle_response(response):
+    if response.startswith("```") and response.endswith("```"):
+        # Parse the code block
+        try:
+            language = response.split("\n")[0][3:]
+            code = "\n".join(response.split("\n")[1:-1])
+            save_code_to_desktop(code, language)
+            text_to_speech("Your code has been successfully saved to the desktop.")
+        except Exception as e:
+            text_to_speech("An error occurred while saving the code.")
+            print(f"Error saving code: {e}")
+    else:
+        text_to_speech(response)
+
 # Main loop for the assistant
 def main():
     while True:
@@ -106,11 +151,11 @@ def main():
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmpfile:
             record_audio(tmpfile.name)  # Record the audio input
             transcribed_text = transcribe_audio(tmpfile.name)  # Convert speech to text
-            print(f"Agent heard: {transcribed_text}")
+            print(f"SentryBOT heard: {transcribed_text}")
             response = rag_ask(transcribed_text)  # Generate response using RAG and LLaMA
-            print(f"Agent response: {response}")
+            print(f"SentryBOT response: {response}")
             if response:
-                text_to_speech(response)  # Convert response to speech
+                handle_response(response)  # Handle response (speech or save code)
 
 # Entry point of the script
 if __name__ == "__main__":
